@@ -1,0 +1,25 @@
+# Python environments
+.venv/
+venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Generated ARC submissions
+submission.json
+
+# Local editor settings
+.vscode/
+
+# Environment variables
+.env
+.env.*
+
+# Operating system
+.DS_Store
+Thumbs.db
