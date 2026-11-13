@@ -17,21 +17,15 @@ class CandidateHypothesis:
         return self.program.apply(grid)
 
 
-def make_hypothesis(
-    program: PixelOperator | ObjectOperator
-) -> CandidateHypothesis:
-
+def make_hypothesis(program: PixelOperator | ObjectOperator) -> CandidateHypothesis:
     if isinstance(program, PixelOperator):
         representation = "pixel"
-
         if program.kind == "geometry":
             cost = 0 if program.operation == "identity" else 1
         else:
             cost = 2
-
     elif isinstance(program, ObjectOperator):
         representation = "object"
-
         cost = {
             "keep": 3,
             "erase": 3,
@@ -40,12 +34,11 @@ def make_hypothesis(
             "translate": 5,
             "duplicate": 5,
         }[program.action]
-
-        # More conditions increase hypothesis complexity.
         cost += int(program.attributes is not None)
         cost += int(program.rank is not None)
         cost += 2 * len(program.relations)
-
+        if program.concept is not None:
+            cost += 2 * len(program.concept.literals)
     else:
         raise TypeError(f"Unsupported program type: {type(program)}")
 
