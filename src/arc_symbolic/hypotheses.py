@@ -2,13 +2,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .operators import ObjectOperator
+from .operators import ObjectOperator, MultiColorOperator
+from .programs import CompositeProgram
 from .pixels import PixelOperator
 
 
 @dataclass(frozen=True)
 class CandidateHypothesis:
-    program: PixelOperator | ObjectOperator
+    program: PixelOperator | ObjectOperator | MultiColorOperator | CompositeProgram
     representation: str
     complexity: int
     label: str
@@ -19,7 +20,8 @@ class CandidateHypothesis:
 
 
 def make_hypothesis(
-    program: PixelOperator | ObjectOperator) -> CandidateHypothesis:
+    program: PixelOperator | ObjectOperator | MultiColorOperator | CompositeProgram,
+) -> CandidateHypothesis:
     if isinstance(program, PixelOperator):
         representation = "pixel"
         if program.kind == "geometry":
@@ -41,6 +43,20 @@ def make_hypothesis(
         cost += 2 * len(program.relations)
         if program.concept is not None:
             cost += 2 * len(program.concept.literals)
+    elif isinstance(program, MultiColorOperator):
+        representation = "multicolor"
+        cost = {"keep":4, "erase":4, "crop":4, "recolor":5,
+                "translate":6, "duplicate":6}[program.action]
+        pred = program.predicate
+        if pred is not None:
+            cost += sum(getattr(pred, name, None) is not None for name in
+                        ("color_set", "includes_color", "shape", "pattern",
+                         "min_area", "max_area"))
+        cost += int(program.rank is not None)
+    elif isinstance(program, CompositeProgram):
+        representation = "composite"
+        # Complexity penalizes length while preserving the atomic scoring.
+        cost = 2 + sum(make_hypothesis(step).complexity for step in program.steps)
     else:
         raise TypeError(f"Unsupported program type: {type(program)}")
 

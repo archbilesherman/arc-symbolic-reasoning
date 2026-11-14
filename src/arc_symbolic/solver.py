@@ -27,6 +27,11 @@ def compute_version_space(
     expanded_concept_vocabulary=False,
     max_revision_memory=24,
     max_revision_candidates=96,
+    enable_multicolor_objects=False,
+    enable_composition=False,
+    max_multicolor_candidates=128,
+    max_composition_prefixes=20,
+    max_composition_pairs=256,
 ):
     candidates = generate_hypotheses(
         task,
@@ -88,6 +93,9 @@ def compute_version_space(
         revision_evaluated = 0
         revision_recovered = False
         recovery = False
+        multicolor_proposed = 0
+        multicolor_evaluated = 0
+        composition_diagnostics = {}
         revision_diagnostics = {}
         evidence_rejections = {}
 
@@ -127,10 +135,37 @@ def compute_version_space(
                 )
             recovery = bool(surviving)
 
+        # Alternative multicolor grouping can recover hypotheses that cannot
+        # be expressed through monochromatic object segmentation.
+        if not surviving and enable_multicolor_objects and include_objects:
+            from .multicolor import propose_multicolor_hypotheses
+            proposed = propose_multicolor_hypotheses(
+                task['train'][:index], max_candidates=max_multicolor_candidates
+            )
+            multicolor_proposed = len(proposed)
+            surviving, multicolor_evaluated = verify_hypotheses(
+                proposed, task['train'][:index]
+            )
+
+        # This bounded search only runs after all single-step mechanisms fail.
+        if not surviving and enable_composition:
+            from .composition import find_composite_survivors
+            surviving, composition_diagnostics = find_composite_survivors(
+                task['train'][:index], memories=memory,
+                max_prefixes=max_composition_prefixes,
+                max_pair_evaluations=max_composition_pairs,
+            )
+
+        if surviving and (multicolor_proposed or composition_diagnostics):
+            recovery = True
+
         history.append({
             'examples_seen': index,
             'evaluated': (base_evaluated + memory_evaluated
-                          + revision_evaluated + learned_evaluated),
+                          + revision_evaluated + learned_evaluated
+                          + multicolor_evaluated
+                          + composition_diagnostics.get('pair_evaluations', 0)
+                          + composition_diagnostics.get('prefix_evaluations', 0)),
             'base_evaluated': base_evaluated,
             'total_survivors': len(surviving),
             'pixel_survivors': sum(h.representation == 'pixel' for h in surviving),
@@ -155,6 +190,15 @@ def compute_version_space(
             'revised_survivors': sum(
                 getattr(h, 'parent_label', None) is not None for h in surviving
             ),
+            'multicolor_candidates_proposed': multicolor_proposed,
+            'multicolor_candidates_evaluated': multicolor_evaluated,
+            'multicolor_survivors': sum(
+                h.representation == 'multicolor' for h in surviving
+            ),
+            'composition_prefix_evaluations': composition_diagnostics.get('prefix_evaluations',0),
+            'composition_prefixes_selected': composition_diagnostics.get('prefixes_selected',0),
+            'composition_pair_evaluations': composition_diagnostics.get('pair_evaluations',0),
+            'composite_survivors': sum(h.representation == 'composite' for h in surviving),
         })
         candidates = surviving
 
@@ -210,6 +254,11 @@ def solve_task(
     expanded_concept_vocabulary=False,
     max_revision_memory=24,
     max_revision_candidates=96,
+    enable_multicolor_objects=False,
+    enable_composition=False,
+    max_multicolor_candidates=128,
+    max_composition_prefixes=20,
+    max_composition_pairs=256,
 ):
     survivors, history = compute_version_space(
         task,
@@ -225,6 +274,11 @@ def solve_task(
         expanded_concept_vocabulary=expanded_concept_vocabulary,
         max_revision_memory=max_revision_memory,
         max_revision_candidates=max_revision_candidates,
+        enable_multicolor_objects=enable_multicolor_objects,
+        enable_composition=enable_composition,
+        max_multicolor_candidates=max_multicolor_candidates,
+        max_composition_prefixes=max_composition_prefixes,
+        max_composition_pairs=max_composition_pairs,
     )
     answers = [predict_two(item['input'], survivors) for item in task['test']]
     return answers, survivors, history

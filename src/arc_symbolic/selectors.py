@@ -114,3 +114,43 @@ def select_objects(
     if rank == "smallest":
         return [min(candidates, key=lambda obj: obj.area)]
     return candidates
+
+
+@dataclass(frozen=True)
+class MultiColorPredicate:
+    """Properties of a multicolor foreground region, not of a single hue."""
+    color_set: frozenset[int] | None = None
+    includes_color: int | None = None
+    shape: tuple[tuple[int, int], ...] | None = None
+    pattern: tuple[tuple[int, int, int], ...] | None = None
+    min_area: int | None = None
+    max_area: int | None = None
+
+    def matches(self, obj):
+        if self.color_set is not None and obj.color_set != self.color_set:
+            return False
+        if self.includes_color is not None and self.includes_color not in obj.color_set:
+            return False
+        if self.shape is not None and obj.normalized_shape != self.shape:
+            return False
+        if self.pattern is not None and obj.normalized_pattern != self.pattern:
+            return False
+        if self.min_area is not None and obj.area < self.min_area:
+            return False
+        if self.max_area is not None and obj.area > self.max_area:
+            return False
+        return True
+
+
+def select_multicolor_objects(objects, predicate=None, rank=None):
+    """Select connected foreground regions independently from mono selectors."""
+    if rank not in (None, 'largest', 'smallest'):
+        raise ValueError('Unsupported rank')
+    predicate = predicate or MultiColorPredicate()
+    selected = [obj for obj in objects if predicate.matches(obj)]
+    selected.sort(key=lambda o:(o.bounding_box[0],o.bounding_box[1],o.id))
+    if selected and rank == 'largest':
+        return [min(selected, key=lambda o:-o.area)]
+    if selected and rank == 'smallest':
+        return [min(selected, key=lambda o:o.area)]
+    return selected
