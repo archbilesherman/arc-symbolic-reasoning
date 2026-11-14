@@ -38,6 +38,26 @@ CONFIGURATIONS = {
         include_motion=True,
         enable_concept_learning=True,
     ),
+    "v4_diagnostics": dict(
+        include_objects=True, include_relations=True, include_motion=True,
+        enable_concept_learning=True, enable_failure_diagnostics=True,
+    ),
+    "v4_memory": dict(
+        include_objects=True, include_relations=True, include_motion=True,
+        enable_concept_learning=True, enable_failure_diagnostics=True,
+        enable_revision_memory=True,
+    ),
+    "v4_revision": dict(
+        include_objects=True, include_relations=True, include_motion=True,
+        enable_concept_learning=True, enable_failure_diagnostics=True,
+        enable_revision_memory=True, enable_counterexample_revision=True,
+    ),
+    "v4_full": dict(
+        include_objects=True, include_relations=True, include_motion=True,
+        enable_concept_learning=True, enable_failure_diagnostics=True,
+        enable_revision_memory=True, enable_counterexample_revision=True,
+        expanded_concept_vocabulary=True,
+    ),
 }
 
 
@@ -83,6 +103,14 @@ def evaluate_arc(
     evaluated_learned_candidates = 0
     tasks_with_learned_survivors = 0
     tasks_solved_with_learned_survivors = 0
+    revision_proposals_total = 0
+    revision_evaluations_total = 0
+    revision_recoveries_total = 0
+    revision_memory_evaluations_total = 0
+    tasks_with_revised_survivors = 0
+    tasks_solved_with_revised_survivors = 0
+    failure_category_totals = {}
+    evidence_rejection_totals = {}
 
     for task_id in tqdm(task_ids, desc=f"ARC {configuration}"):
         if task_id not in solutions:
@@ -124,6 +152,22 @@ def evaluate_arc(
             and h.program.concept is not None
         ]
         has_learned_survivor = bool(learned_survivors)
+        revised_survivors = [h for h in survivors if getattr(h, 'parent_label', None) is not None]
+        task_revision_proposals = sum(x['revision_candidates_proposed'] for x in history)
+        task_revision_evaluations = sum(x['revision_candidates_evaluated'] for x in history)
+        task_revision_recoveries = sum(int(x['revision_recovered']) for x in history)
+        task_memory_evaluations = sum(x['revision_memory_evaluations'] for x in history)
+        for stage in history:
+            for name, count in stage['failure_diagnostics'].items():
+                failure_category_totals[name] = failure_category_totals.get(name, 0) + count
+            for name, count in stage['evidence_rejections'].items():
+                evidence_rejection_totals[name] = evidence_rejection_totals.get(name, 0) + count
+        revision_proposals_total += task_revision_proposals
+        revision_evaluations_total += task_revision_evaluations
+        revision_recoveries_total += task_revision_recoveries
+        revision_memory_evaluations_total += task_memory_evaluations
+        tasks_with_revised_survivors += int(bool(revised_survivors))
+        tasks_solved_with_revised_survivors += int(task_solved and bool(revised_survivors))
         task_triggers = sum(int(x["concept_learning_triggered"]) for x in history)
         task_recoveries = sum(int(x["version_space_recovered"]) for x in history)
         task_proposals = sum(x["learned_candidates_proposed"] for x in history)
@@ -163,6 +207,12 @@ def evaluate_arc(
             "version_space_recoveries": task_recoveries,
             "learned_candidates_proposed": task_proposals,
             "learned_candidates_evaluated": task_learned_eval,
+            "revision_candidates_proposed": task_revision_proposals,
+            "revision_candidates_evaluated": task_revision_evaluations,
+            "revision_recoveries": task_revision_recoveries,
+            "revision_memory_evaluations": task_memory_evaluations,
+            "has_revised_survivor": bool(revised_survivors),
+            "revised_survivors": len(revised_survivors),
         }
 
     tasks_count = len(task_ids)
@@ -202,6 +252,14 @@ def evaluate_arc(
             "learned_candidates_evaluated_total": evaluated_learned_candidates,
             "tasks_with_learned_survivors": tasks_with_learned_survivors,
             "tasks_solved_with_learned_survivors": tasks_solved_with_learned_survivors,
+            "revision_candidates_proposed_total": revision_proposals_total,
+            "revision_candidates_evaluated_total": revision_evaluations_total,
+            "revision_recoveries_total": revision_recoveries_total,
+            "revision_memory_evaluations_total": revision_memory_evaluations_total,
+            "tasks_with_revised_survivors": tasks_with_revised_survivors,
+            "tasks_solved_with_revised_survivors": tasks_solved_with_revised_survivors,
+            "failure_category_counts": dict(sorted(failure_category_totals.items())),
+            "evidence_rejection_counts": dict(sorted(evidence_rejection_totals.items())),
         },
         "tasks": records,
     }

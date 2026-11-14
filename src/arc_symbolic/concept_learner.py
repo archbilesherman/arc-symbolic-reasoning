@@ -9,7 +9,7 @@ from itertools import combinations
 
 import numpy as np
 
-from .concepts import LearnedConcept, object_facts
+from .concepts import LearnedConcept, object_facts, EXPANDED_FEATURES
 from .hypotheses import CandidateHypothesis, make_hypothesis
 from .objects import ARCObject, extract_objects
 from .operators import ObjectOperator
@@ -28,8 +28,10 @@ def extract_selection_evidence(
     action: str,
     target_color: int | None = None,
     connectivity: int = 4,
+    *,
+    expanded_vocabulary: bool = False,
 ) -> tuple[list[ObjectObservation], list[ObjectObservation]] | None:
-    """Infer selected/unselected objects for a single proposed action.
+    """Infer selected/unselected objects for a *single* proposed action.
 
     Return None when any training pair cannot be explained by whole-object
     application of that action.  Neutral target-colored objects are excluded
@@ -37,7 +39,9 @@ def extract_selection_evidence(
     """
     if action not in {"recolor", "erase", "keep"}:
         raise ValueError(f"Unsupported concept-learning action: {action}")
-    if action == "recolor" and (target_color is None or not 1 <= target_color <= 9):
+    if action == "recolor" and (
+        target_color is None or not 1 <= target_color <= 9
+    ):
         raise ValueError("recolor requires a target color from 1 through 9")
     if not examples:
         return None
@@ -95,6 +99,7 @@ def extract_selection_evidence(
 
             facts = object_facts(
                 obj, scene, before.shape, connectivity,
+                expanded_vocabulary=expanded_vocabulary,
             )
             item = ObjectObservation(obj=obj, facts=facts)
             if selected:
@@ -115,7 +120,7 @@ def extract_selection_evidence(
 def _literal_priority(literal: str) -> tuple[int, str]:
     """Favor structural generalization over example-specific colors."""
     base = literal.removeprefix("not:")
-    if base in {"touches_border", "solid_rectangle", "square_bbox"}:
+    if base in {"touches_border", "solid_rectangle", "square_bbox", *EXPANDED_FEATURES}:
         return (0, literal)
     if base in {"largest", "smallest"}:
         return (1, literal)
@@ -171,6 +176,8 @@ def propose_concept_hypotheses(
     examples: list[dict],
     max_literals: int = 2,
     max_candidates: int = 128,
+    *,
+    expanded_vocabulary: bool = False,
 ) -> list[CandidateHypothesis]:
     """Generate evidence-guided new single-step hypotheses."""
     if max_candidates < 1:
@@ -192,7 +199,8 @@ def propose_concept_hypotheses(
             targets = output_colors if action == "recolor" else [None]
             for target_color in targets:
                 evidence = extract_selection_evidence(
-                    examples, action, target_color, connectivity
+                    examples, action, target_color, connectivity,
+                    expanded_vocabulary=expanded_vocabulary,
                 )
                 if evidence is None:
                     continue

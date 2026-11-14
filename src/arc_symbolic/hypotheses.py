@@ -12,12 +12,14 @@ class CandidateHypothesis:
     representation: str
     complexity: int
     label: str
+    parent_label: str | None = None
 
     def apply(self, grid) -> np.ndarray | None:
         return self.program.apply(grid)
 
 
-def make_hypothesis(program: PixelOperator | ObjectOperator) -> CandidateHypothesis:
+def make_hypothesis(
+    program: PixelOperator | ObjectOperator) -> CandidateHypothesis:
     if isinstance(program, PixelOperator):
         representation = "pixel"
         if program.kind == "geometry":
