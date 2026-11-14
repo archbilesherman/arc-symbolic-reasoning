@@ -138,3 +138,67 @@ class ObjectOperator:
             offset=self.offset,
             concept=self.concept,
         )
+
+
+@dataclass(frozen=True)
+class MultiColorOperator:
+    """Operate on whole foreground-connected regions, preserving pixel colors."""
+
+    action: Action
+    predicate: object = None
+    connectivity: int = 4
+    rank: Rank | None = None
+    target_color: int | None = None
+    offset: tuple[int, int] | None = None
+
+    def apply(self, grid) -> np.ndarray | None:
+        from .multicolor import extract_multicolor_objects
+        from .selectors import select_multicolor_objects
+
+        if self.action not in ('keep','erase','crop','translate','duplicate','recolor'):
+            raise ValueError('Unsupported multicolor action')
+        if self.action == 'recolor' and (self.target_color is None
+                                        or not 0 <= self.target_color <= 9):
+            raise ValueError('Invalid target color')
+        if self.action in ('translate','duplicate') and (
+                self.offset is None or len(self.offset) != 2
+                or not all(isinstance(x, int) for x in self.offset)):
+            raise ValueError('An integer offset is required')
+        arr = np.asarray(grid, dtype=np.int64)
+        objects = extract_multicolor_objects(arr, self.connectivity)
+        selected = select_multicolor_objects(objects, self.predicate, self.rank)
+        if not selected:
+            return None
+        cells = [(r,c) for obj in selected for r,c in obj.cells]
+        if self.action in ('erase','recolor'):
+            result=arr.copy()
+            color = 0 if self.action == 'erase' else self.target_color
+            for r,c in cells:
+                result[r,c] = color
+            return result
+        if self.action in ('keep','crop'):
+            result=np.zeros_like(arr)
+            for r,c in cells:
+                result[r,c] = arr[r,c]
+            if self.action == 'crop':
+                top=min(r for r,c in cells); bottom=max(r for r,c in cells)
+                left=min(c for r,c in cells); right=max(c for r,c in cells)
+                result=result[top:bottom+1,left:right+1].copy()
+            return result
+        dr,dc = self.offset
+        h,w=arr.shape
+        dst=[]
+        for r,c in cells:
+            nr,nc=r+dr,c+dc
+            if not 0<=nr<h or not 0<=nc<w:
+                return None
+            dst.append((nr,nc,int(arr[r,c])))
+        result=arr.copy()
+        if self.action=='translate':
+            for r,c in cells:
+                result[r,c]=0
+        if any(result[r,c]!=0 for r,c,v in dst):
+            return None
+        for r,c,color in dst:
+            result[r,c]=color
+        return result

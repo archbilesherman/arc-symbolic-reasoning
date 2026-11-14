@@ -58,6 +58,30 @@ CONFIGURATIONS = {
         enable_revision_memory=True, enable_counterexample_revision=True,
         expanded_concept_vocabulary=True,
     ),
+    # V5 mechanisms can be tested independently for explicit ablation studies.
+    "v5_multicolor": dict(
+        include_objects=True, include_relations=True, include_motion=True,
+        enable_concept_learning=True, enable_failure_diagnostics=True,
+        enable_revision_memory=True, enable_counterexample_revision=True,
+        expanded_concept_vocabulary=True, enable_multicolor_objects=True,
+        max_multicolor_candidates=128,
+    ),
+    "v5_composition": dict(
+        include_objects=True, include_relations=True, include_motion=True,
+        enable_concept_learning=True, enable_failure_diagnostics=True,
+        enable_revision_memory=True, enable_counterexample_revision=True,
+        expanded_concept_vocabulary=True, enable_composition=True,
+        max_composition_prefixes=20, max_composition_pairs=256,
+    ),
+    "v5_full": dict(
+        include_objects=True, include_relations=True, include_motion=True,
+        enable_concept_learning=True, enable_failure_diagnostics=True,
+        enable_revision_memory=True, enable_counterexample_revision=True,
+        expanded_concept_vocabulary=True, enable_multicolor_objects=True,
+        enable_composition=True,
+        max_multicolor_candidates=128,
+        max_composition_prefixes=20, max_composition_pairs=256,
+    ),
 }
 
 
@@ -72,6 +96,7 @@ def evaluate_arc(
     *,
     configuration: str = "full",
     max_tasks: int | None = None,
+    task_ids: list[str] | None = None,
 ) -> dict:
     """Evaluate without accessing held-out outputs during inference."""
     if configuration not in CONFIGURATIONS:
@@ -79,8 +104,12 @@ def evaluate_arc(
     if max_tasks is not None and max_tasks < 1:
         raise ValueError("max_tasks must be positive or None")
 
-    task_ids = list(challenges)[:max_tasks]
-    if not task_ids:
+    selected_ids = list(challenges) if task_ids is None else list(dict.fromkeys(task_ids))
+    unknown = [name for name in selected_ids if name not in challenges]
+    if unknown:
+        raise ValueError(f"Unknown task IDs: {', '.join(unknown)}")
+    selected_ids = selected_ids[:max_tasks]
+    if not selected_ids:
         raise ValueError("No tasks to evaluate")
 
     settings = CONFIGURATIONS[configuration]
@@ -111,8 +140,16 @@ def evaluate_arc(
     tasks_solved_with_revised_survivors = 0
     failure_category_totals = {}
     evidence_rejection_totals = {}
+    multicolor_proposals_total = 0
+    multicolor_evaluations_total = 0
+    composition_prefix_evaluations_total = 0
+    composition_pair_evaluations_total = 0
+    tasks_with_multicolor_survivors = 0
+    tasks_with_composite_survivors = 0
+    tasks_solved_with_multicolor_survivors = 0
+    tasks_solved_with_composite_survivors = 0
 
-    for task_id in tqdm(task_ids, desc=f"ARC {configuration}"):
+    for task_id in tqdm(selected_ids, desc=f"ARC {configuration}"):
         if task_id not in solutions:
             raise KeyError(f"Missing solutions for task {task_id}")
         start = perf_counter()
@@ -157,6 +194,20 @@ def evaluate_arc(
         task_revision_evaluations = sum(x['revision_candidates_evaluated'] for x in history)
         task_revision_recoveries = sum(int(x['revision_recovered']) for x in history)
         task_memory_evaluations = sum(x['revision_memory_evaluations'] for x in history)
+        task_multicolor_proposals = sum(x.get('multicolor_candidates_proposed',0) for x in history)
+        task_multicolor_evaluations = sum(x.get('multicolor_candidates_evaluated',0) for x in history)
+        task_composition_prefixes = sum(x.get('composition_prefix_evaluations',0) for x in history)
+        task_composition_pairs = sum(x.get('composition_pair_evaluations',0) for x in history)
+        multicolor_survivors = [h for h in survivors if h.representation == 'multicolor']
+        composite_survivors = [h for h in survivors if h.representation == 'composite']
+        multicolor_proposals_total += task_multicolor_proposals
+        multicolor_evaluations_total += task_multicolor_evaluations
+        composition_prefix_evaluations_total += task_composition_prefixes
+        composition_pair_evaluations_total += task_composition_pairs
+        tasks_with_multicolor_survivors += int(bool(multicolor_survivors))
+        tasks_with_composite_survivors += int(bool(composite_survivors))
+        tasks_solved_with_multicolor_survivors += int(task_solved and bool(multicolor_survivors))
+        tasks_solved_with_composite_survivors += int(task_solved and bool(composite_survivors))
         for stage in history:
             for name, count in stage['failure_diagnostics'].items():
                 failure_category_totals[name] = failure_category_totals.get(name, 0) + count
@@ -213,15 +264,22 @@ def evaluate_arc(
             "revision_memory_evaluations": task_memory_evaluations,
             "has_revised_survivor": bool(revised_survivors),
             "revised_survivors": len(revised_survivors),
+            "multicolor_candidates_proposed": task_multicolor_proposals,
+            "multicolor_candidates_evaluated": task_multicolor_evaluations,
+            "multicolor_survivors": len(multicolor_survivors),
+            "composition_prefix_evaluations": task_composition_prefixes,
+            "composition_pair_evaluations": task_composition_pairs,
+            "composite_survivors": len(composite_survivors),
         }
 
-    tasks_count = len(task_ids)
+    tasks_count = len(selected_ids)
     return {
         "metadata": {
             "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "configuration": configuration,
             "solver_options": settings,
             "max_tasks": max_tasks,
+            "selected_task_ids": list(selected_ids) if task_ids is not None else None,
         },
         "summary": {
             "tasks": tasks_count,
@@ -258,6 +316,14 @@ def evaluate_arc(
             "revision_memory_evaluations_total": revision_memory_evaluations_total,
             "tasks_with_revised_survivors": tasks_with_revised_survivors,
             "tasks_solved_with_revised_survivors": tasks_solved_with_revised_survivors,
+            "multicolor_candidates_proposed_total": multicolor_proposals_total,
+            "multicolor_candidates_evaluated_total": multicolor_evaluations_total,
+            "composition_prefix_evaluations_total": composition_prefix_evaluations_total,
+            "composition_pair_evaluations_total": composition_pair_evaluations_total,
+            "tasks_with_multicolor_survivors": tasks_with_multicolor_survivors,
+            "tasks_solved_with_multicolor_survivors": tasks_solved_with_multicolor_survivors,
+            "tasks_with_composite_survivors": tasks_with_composite_survivors,
+            "tasks_solved_with_composite_survivors": tasks_solved_with_composite_survivors,
             "failure_category_counts": dict(sorted(failure_category_totals.items())),
             "evidence_rejection_counts": dict(sorted(evidence_rejection_totals.items())),
         },
@@ -280,6 +346,10 @@ def main():
         "--max-tasks", type=int, default=25, help="0 means all tasks"
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--task-ids", type=str, default=None,
+        help="Comma-separated ARC task IDs for targeted diagnostics",
+    )
     args = parser.parse_args()
 
     if args.max_tasks < 0:
@@ -301,6 +371,8 @@ def main():
         solutions,
         configuration=args.configuration,
         max_tasks=args.max_tasks or None,
+        task_ids=[x.strip() for x in args.task_ids.split(',') if x.strip()]
+                 if args.task_ids else None,
     )
     report["metadata"].update({
         "split": args.split,
